@@ -1,0 +1,760 @@
+;; Persistent storage
+global int token_rate;  ;; Token rate set during deployment
+global slice owner_addr_cell;  ;; Store the owner's address as a cell, not slice
+global int ton_balance;  ;; TON balance collected from sales
+global int whitelist;  ;; TON balance collected from sales
+global cell project_id;  ;; TON balance collected from sales
+global int status;  ;; TON balance collected from sales
+
+global slice token_address;  ;; Store the owner's address as a cell, not slice
+global int startTime;  ;; TON balance collected from sales
+global int endTime;  ;; TON balance collected from sales
+global int minBuy;  ;; TON balance collected from sales
+global int maxBuy;  ;; TON balance collected from sales
+global int hardCap;  ;; TON balance collected from sales
+global int softCap;  ;; TON balance collected from sales
+global int tokenSold;  ;; TON balance collected from sales
+global cell usesr_claimed;  ;; TON balance collected from sales
+;; global int liquidityAmount;  ;; TON balance collected from sales
+;; global int liquidityRate;  ;; TON balance collected from sales
+
+;; Store each user's token balance in a dictionary (map)
+global cell users_token;  ;; (Address => Token balance)
+global cell users_whitelisted;  ;; (Address => Token balance)
+global cell users_contribution;  ;; (Address => Token balance)
+global cell users_last_contribution;  ;; (Address => Token balance)
+
+;; address utils
+
+const int ADDRESS_SIZE = 264; ;; 256 + 8
+;; Function to handle incoming transactions (buying tokens)
+
+
+() load_data() impure inline_ref {
+    slice ds = get_data().begin_parse();
+    token_rate = ds~load_coins() ;
+    ton_balance = ds~load_coins() ;
+    status = ds~load_uint(8); ;; status
+    startTime = ds~load_uint(32); ;; startTime 
+    endTime = ds~load_uint(32); ;; endTime 
+    minBuy = ds~load_coins(); ;; minBuy 
+    maxBuy = ds~load_coins(); ;; maxBuy 
+    hardCap = ds~load_coins(); ;; hardCap 
+    softCap = ds~load_coins(); ;; softCap 
+    ;; liquidityAmount = ds~load_coins(); ;; liquidityAmount 
+    ;; liquidityRate = ds~load_coins(); ;; whitelist  
+    whitelist = ds~load_uint(8); ;; whitelist  
+    token_address = ds~load_msg_addr(); ;; token_address 
+    users_token =   ds~load_dict(); ;; users_token 
+    users_contribution =   ds~load_dict(); ;; users_contribution 
+    users_last_contribution =   ds~load_dict(); ;; users_contribution 
+    usesr_claimed =  ds~load_dict(); ;; usesr_claimed
+    owner_addr_cell =  ds~load_msg_addr(); ;; owner_addr_cell
+    project_id =  ds~load_ref(); ;; project_id
+    ds.end_parse();
+}
+
+ 
+
+
+
+() save_data() impure inline_ref {
+    set_data(begin_cell()
+            .store_coins(token_rate)
+            .store_coins(ton_balance)
+            .store_uint(status,8)
+            .store_uint(startTime,32)
+            .store_uint(endTime,32)
+            .store_coins(minBuy)
+            .store_coins(maxBuy)
+            .store_coins(hardCap)
+            .store_coins(softCap)
+        ;; .store_coins(liquidityAmount)
+        ;; .store_coins(liquidityRate)
+            .store_uint(whitelist,8)
+            .store_slice(token_address) 
+            .store_dict(users_token)
+            .store_dict(users_contribution)
+            .store_dict(users_last_contribution)
+            .store_dict(usesr_claimed)
+            .store_slice(owner_addr_cell) 
+            .store_ref(project_id) 
+            .end_cell()
+    );
+}
+
+
+
+(slice, int) dict_get?(cell dict, int key_len, slice index) asm(index dict key_len) "DICTGET" "NULLSWAPIFNOT";
+;; cell dict_set_builder(cell dict, int key_len, slice index, builder value) asm(value index dict key_len) "DICTSETB";
+
+slice pack_address(slice address) inline {
+    (int wc, int address_hash) = parse_std_addr(address);
+    return begin_cell().store_int(wc, 8).store_uint(address_hash, 256).end_cell().begin_parse();
+}
+
+
+;; () recv_internal() {
+;;     ;; Handle the internal message
+;;     return ();
+;; }
+ 
+
+() jetton_transfer(cell jetton_wallet_code, slice to_address, int jetton_amount, int query_id, int forward_ton_amount) impure {
+    ;; Prepare the internal message to call transfer function on the jetton wallet contract
+    ;; 1. Jetton wallet address (to call transfer function)
+    ;; 2. The transfer function ID and its arguments
+    load_data();
+    ;; const internal_transfer = 0x178d4519;
+    cell state_init = calculate_jetton_wallet_state_init(to_address,token_address , jetton_wallet_code);
+    ;; slice to_wallet_address = calculate_jetton_wallet_address(state_init);
+    slice calculated_wallet_address = calculate_jetton_wallet_address(state_init);
+
+
+    cell fromstate_init = calculate_jetton_wallet_state_init(my_address(), token_address, jetton_wallet_code);
+    slice from_wallet_address = calculate_jetton_wallet_address(fromstate_init);
+
+
+
+    ;; slice from_add = my_address(); 
+    ;; cell contractToken = calculate_user_jetton_wallet_address(from_add, token_address, jetton_wallet_code);
+
+    var master_msg = begin_cell()
+        .store_uint(op::transfer(), 32)
+        .store_uint(4, 64) ;; quert_id
+        .store_coins(jetton_amount)
+        .store_slice(to_address) ;; from_address
+        .store_slice(to_address) ;; from_address
+        .store_uint(0, 1) ;; forward_payload in this slice, not separate cell
+        .store_coins(0) ;; no forward_amount
+        .store_uint(0, 1) ;; forward_payload in this slice, not separate cell
+        .end_cell();
+
+
+    ;; if (equal_slices(calculated_wallet_address, to_address)) {
+
+
+    var msg = begin_cell()
+	    .store_uint(0x18, 6)
+	    .store_slice(from_wallet_address)
+	    .store_coins(forward_ton_amount)
+	    .store_uint(1,107)
+	    .store_ref(master_msg);
+    
+    send_raw_message(msg.end_cell(), 1); ;; pay transfer fees separately, revert on errors
+    
+    ;; } else {
+
+
+    ;; var msg = begin_cell()
+    ;;     .store_uint(0x18, 6)
+    ;;     .store_slice(from_wallet_address)
+    ;;     .store_coins(0)
+    ;;     .store_uint(1, 1 + 4 + 4 + 64 + 32 + 1 + 1 + 1)
+    ;;     .store_ref(master_msg);
+    
+    ;; send_raw_message(msg.end_cell(), 1); ;; pay transfer fees separately, revert on errors
+  
+    ;; }
+
+
+
+    ;; send_simple_message(0, sender_address, body.end_cell(), CARRY_REMAINING_GAS);
+
+    ;; var body = begin_cell()
+    ;;     .store_uint(0xf8a7ea5, 32)
+    ;;     .store_uint(query_id, 64)
+    ;;     .store_coins(jetton_amount)
+    ;;     .store_slice(to_address) ;; to_owner_address
+    ;;     .store_slice(to_address)
+    ;;     .store_uint(0, 1)
+    ;;     .store_coins(forward_ton_amount) ;; forward_ton_amount
+    ;;     .store_uint(0, 1)
+    ;;     .store_uint(0, 32)
+    ;;     .end_cell();
+
+
+    ;; cell msg = begin_cell()
+    ;;     .store_uint(0x18, 6)
+    ;;     .store_slice(token_address)
+    ;;     .store_coins(0)
+    ;;     .store_uint(1, 107)
+    ;;     .store_ref(body)
+    ;;     .end_cell();
+
+    ;; send_raw_message(msg, 64);
+
+
+    ;; cell state_init = calculate_jetton_wallet_state_init(to_address, token_address, jetton_wallet_code);
+    ;; slice to_wallet_address = calculate_jetton_wallet_address(state_init);
+
+    ;; cell fromstate_init = calculate_user_jetton_wallet_address(my_address(), token_address, jetton_wallet_code);
+    ;; slice from_wallet_address = calculate_jetton_wallet_address(fromstate_init);
+
+    ;; ;; slice from_wallet_address = calculate_jetton_wallet_address(state_init);
+    ;; ;; Define the method ID for the transfer function (as per the Jetton wallet contract)
+    ;; var msg = begin_cell()
+    ;; .storeUint(op::transfer())
+    ;; .storeUint("6083770390480522000", 64)
+    ;; .store_coins(jetton_amount)
+    ;; .store_slice(to_wallet_address)
+    ;; .store_slice(my_address())
+    ;; .storeBit(false)
+    ;; .storeCoins(1000000)
+    ;; .storeBit(false);
+    ;; send_raw_message(from_wallet_address, 1000000 , 1 , msg.end_cell());
+
+    ;; cell forward_payload = begin_cell().end_cell() ; 
+    ;; cell state_init = calculate_jetton_wallet_state_init(to_address, token_address, jetton_wallet_code);
+
+    ;; ;; Prepare the internal message body for the recipient
+    ;; var msg_body =  begin_cell()
+    ;; .store_uint(op::transfer(), 32)
+    ;; .store_uint(6083770390480522000,64)
+    ;; .store_coins(jetton_amount)
+    ;; .store_slice(to_address)
+    ;; .store_slice(my_address())
+    ;; .store_uint(false,1)
+    ;; .store_coins(1000000)
+    ;; .store_uint(false,1) 
+    ;; .end_cell();
+
+    ;; ;; Create the internal message to send to the recipient
+    ;; var msg = begin_cell()
+    ;;     .store_uint(0x18, 6)                     ;; Operation code for internal message
+    ;;     .store_slice(from_wallet_address)          ;; Recipient address
+    ;;     .store_coins(forward_ton_amount)         ;; TON to forward to recipient for storage fees
+    ;;     .store_uint(1, 1 + 4 + 4 + 64 + 32 + 1 + 1) ;; Message flags
+    ;;     .store_ref(state_init)                   ;; The state init of the recipient's Jetton wallet
+    ;;     .store_ref(msg_body)                     ;; Message body with transfer details
+    ;;     .end_cell();
+    
+    ;; ;; Send the message using send_raw_message
+    ;; send_raw_message(msg, 64);     
+    return ();
+
+   
+
+}
+
+
+() recv_internal(int msg_value, cell in_msg_full, slice in_msg_body) impure {
+
+    ;; Check if the incoming message is internal and carries value
+   
+    slice cs = in_msg_full.begin_parse();
+    int flags = cs~load_uint(4);
+    
+    
+    slice sender_address = cs~load_msg_addr();
+
+    int op = in_msg_body~load_uint(8);
+    cell _project_id = in_msg_body~load_ref();
+    slice address = in_msg_body~load_msg_addr(); 
+
+    throw_unless(700, equal_slices(address, sender_address));
+
+    ;; initialize
+    if (op == 1) {
+
+        throw_unless(705, msg_value >= 10000000);
+
+        ;;  var msg = begin_cell()
+        ;; .store_uint(0x18, 6)
+        ;; .store_slice("0QDHq_jBMMB4Fx2FgmRbXu7IK-yufw-T_tPcnNmUkcSo4jCs")
+        ;; .store_coins(10000000);	    
+    
+        ;; send_raw_message(msg.end_cell(), 1); 
+
+ 
+        int _status = in_msg_body~load_uint(8);
+        int _whitelist = in_msg_body~load_uint(8);
+        int _token_rate = in_msg_body~load_coins();
+
+        int _startTime = in_msg_body~load_uint(32);
+        int _endTime = in_msg_body~load_uint(32);
+        int _minBuy = in_msg_body~load_coins();
+        int _maxBuy = in_msg_body~load_coins();
+        int _hardCap = in_msg_body~load_coins();
+        int _softCap = in_msg_body~load_coins();
+        ;; int _liquidityAmount = in_msg_body~load_coins();
+        ;; int _liquidityRate = in_msg_body~load_coins();        
+        slice _token_address = in_msg_body~load_msg_addr();
+        cell storage_cell = get_data();
+        slice ds = storage_cell.begin_parse();
+
+        if(ds~load_coins()){
+            return ();
+        }
+        ;; token_rate = _token_rate;
+        ;; if (ds.slice_bits() == 0) {
+           
+        ;; }
+
+        ;;  load_data();
+
+        token_rate = _token_rate;     
+        ton_balance = 0;
+        status = _status ;
+        whitelist = _whitelist ;
+        users_contribution = null();
+        users_last_contribution = null();
+        usesr_claimed = null();
+        users_token = null();
+        owner_addr_cell = address;
+
+        startTime = _startTime;
+        endTime = _endTime;
+        minBuy = _minBuy;
+        maxBuy = _maxBuy;
+        hardCap = _hardCap;
+        softCap = _softCap;
+        ;; liquidityAmount = _liquidityAmount;
+        ;; liquidityRate = _liquidityRate;
+        token_address = _token_address;
+
+        project_id = _project_id   ;
+
+
+        save_data();    
+
+        return ();
+
+    }
+
+    ;; purchase
+    if (op == 2) {
+        int ton_sent = msg_value ;
+        load_data();
+        
+        
+        throw_if(701, status != 1);
+        throw_if(702, startTime > now());
+        throw_if(703, endTime < now());
+        throw_if(706, ton_balance + ton_sent > hardCap);
+        throw_if(707, ton_sent > maxBuy);
+        throw_if(708, ton_sent < minBuy);
+ 
+        
+        if(whitelist == 1){
+            (slice _whitelisted, int _whitelist) = users_whitelisted.dict_get?(ADDRESS_SIZE, pack_address(address));
+            int _val  = 0 ;
+            if(_whitelist){
+                int _val = _whitelisted~load_coins();                 
+            }
+            throw_if(708, _val == 0);
+        }
+
+
+
+        int tokens_to_sell = ( ton_sent * token_rate ) / 1000000000; 
+        ;; Get the sender's address and update their token balance
+        ;; int _user_tokens = map_get(users_contribution, msg_sender(), 0);  ;; Get existing tokens
+
+        (slice value, int _old_user_tokens) = users_token.dict_get?(ADDRESS_SIZE, pack_address(address));
+
+        int _user_tokens = tokens_to_sell ; 
+        if(_old_user_tokens == -1){
+            int _coins = value~load_coins(); 
+            _user_tokens = _coins + tokens_to_sell;
+        }
+
+
+
+        (slice contrivalue, int _old_user_contri) = users_contribution.dict_get?(ADDRESS_SIZE, pack_address(address));
+
+        int _user_contri = ton_sent ; 
+        if(_old_user_contri == -1){
+            int _contri = contrivalue~load_coins(); 
+            _user_contri = _contri + ton_sent;
+        }
+       
+
+        ;; if(_user_tokens == -1){
+        ;;     _user_tokens = 10000000 ; 
+        ;; }
+
+        users_last_contribution~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_coins(_user_tokens).store_coins(_user_contri).store_uint(now(),32));
+       
+        ;; map_set(users_contribution, msg_sender(), user_tokens);  ;; Store updated token balance
+        ;; users_contribution~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_int(-1, 1));
+        ;; users_contribution~dict_set_builder(users_contribution, ADDRESS_SIZE, pack_address(address), begin_cell().store_int(-1, 32));
+        users_token~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_coins(_user_tokens));
+        users_contribution~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_coins(_user_contri));
+
+        ;; whitelist~dict_set_builder(ADDRESS_SIZE, pack_address(whitelist_address), begin_cell().store_int(-1, 1));
+        
+        ;; Increase the TON balance
+        ton_balance = ton_balance + ton_sent;
+        save_data();
+
+        ;; builder msg = begin_cell() 
+        ;;     .store_slice(address) 
+        ;;     .store_slice(project_id) ; 
+
+        ;; send_raw_message(msg.end_cell(), 64);
+        return ();
+
+    }
+    ;; claim
+    if (op == 3) {
+        int query_id = in_msg_body~load_uint(32);    
+        int forwardAmount = in_msg_body~load_coins();    
+        cell jetton_wallet_code = in_msg_body~load_ref();    
+        load_data();
+         
+
+        throw_if(701, status != 2);
+
+
+        ;; get user token
+        (slice value, int _old_user_tokens) = users_token.dict_get?(ADDRESS_SIZE, pack_address(address));
+        int _coins = 0  ; 
+        if(_old_user_tokens){
+            _coins = value~load_coins() ; 
+        }  
+
+       
+        throw_if(702, _coins == 0);
+
+        users_token~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_coins(0));
+
+        ;; get user claimed
+        (slice claimed, int _old_user_claimed) = usesr_claimed.dict_get?(ADDRESS_SIZE, pack_address(address));
+        int _user_claimed = _coins ; 
+        if(_old_user_claimed){
+            int _claimed = claimed~load_coins(); 
+            _user_claimed = _coins + _claimed;
+        }
+
+        usesr_claimed~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_coins(_user_claimed));
+        save_data();
+
+        jetton_transfer(jetton_wallet_code,address,_coins,query_id,forwardAmount);
+
+        return ();
+
+    }
+
+    ;; finalize
+    if (op == 4) {
+        int query_id = in_msg_body~load_uint(32);    
+        int forwardAmount = in_msg_body~load_coins();    
+        cell jetton_wallet_code = in_msg_body~load_ref(); 
+        load_data();
+
+       
+        throw_if(701, status != 1);
+ 
+        throw_if(702, (endTime > now()) & (ton_balance < hardCap) );
+ 
+        throw_if(703, ton_balance < softCap);
+
+        status = 2 ;
+        save_data();
+
+        int totalToken = (token_rate * hardCap) / 1000000000 ; 
+        int tokenSold = (token_rate * ton_balance) / 1000000000 ; 
+        int remaining = totalToken - tokenSold ; 
+        if(remaining > 0){
+            jetton_transfer(jetton_wallet_code,owner_addr_cell,remaining,query_id,forwardAmount);
+        }
+         
+
+
+
+        slice msg_body = begin_cell().end_cell().begin_parse();
+
+        cell msg = begin_cell()
+                  .store_uint(0x18, 6)
+                  .store_slice(owner_addr_cell)
+                  .store_coins(ton_balance)
+                  .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+                  .store_slice(msg_body)
+                  .end_cell();
+
+ 
+        send_raw_message(msg, 64); 
+
+        
+            
+    }
+
+
+    ;; cancel
+    if (op == 8) {
+        int query_id = in_msg_body~load_uint(32);    
+        int forwardAmount = in_msg_body~load_coins();    
+        cell jetton_wallet_code = in_msg_body~load_ref(); 
+        load_data();
+
+      
+        throw_if(701, status != 1);
+
+
+
+        status = 3 ;
+        save_data();
+        int totalToken = (token_rate * hardCap) / 1000000000 ; 
+        if(totalToken > 0){
+            jetton_transfer(jetton_wallet_code,owner_addr_cell,totalToken,query_id,forwardAmount);
+        }
+        return ();
+
+    }
+
+
+    ;; claim cancelled TON
+    if (op == 5) {
+           
+        load_data();
+
+        throw_if(701, status != 3);
+
+        (slice contrivalue, int _old_user_contri) = users_contribution.dict_get?(ADDRESS_SIZE, pack_address(address));
+
+        int _user_contri = 0 ; 
+        if(_old_user_contri){
+        int _contri = contrivalue~load_coins(); 
+        _user_contri = _contri ;
+        }
+ 
+        throw_if(703, _user_contri == 0);
+         
+        
+
+        users_token~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_coins(0));
+
+        users_contribution~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_coins(0));
+        save_data();
+
+
+
+                slice msg_body = begin_cell().end_cell().begin_parse();
+
+                cell msg = begin_cell()
+            .store_uint(0x18, 6)
+            .store_slice(address)
+            .store_coins(_user_contri)
+            .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+            .store_slice(msg_body)
+          .end_cell();
+
+ 
+                send_raw_message(msg, 64); 
+        
+
+        return ();
+
+    }
+
+
+    ;; emergency withdraw TON
+    if (op == 7) {
+       
+        load_data();
+        
+        throw_if(701, status != 1);
+
+
+        (slice contrivalue, int _old_user_contri) = users_last_contribution.dict_get?(ADDRESS_SIZE, pack_address(address));
+
+        int __user_contri = 0 ; 
+        int __user_token = 0 ; 
+        int _time = 0;
+        if(_old_user_contri){
+            int _token = contrivalue~load_coins(); 
+            __user_token = _token ;
+            int _contri = contrivalue~load_coins(); 
+            __user_contri = _contri ;
+            _time = contrivalue~load_uint(32); 
+       
+        }
+
+        
+
+        throw_if(701, now() - _time > 300);
+        throw_if(702, __user_contri == 0);
+        
+        (slice value, int _old_user_tokens) = users_token.dict_get?(ADDRESS_SIZE, pack_address(address));
+
+        int _user_tokens = 0 ; 
+        if(_old_user_tokens == -1){
+            int _coins = value~load_coins(); 
+            _user_tokens = _coins - __user_token;
+        }
+
+
+
+        (slice contrivalue, int _old_user_contri) = users_contribution.dict_get?(ADDRESS_SIZE, pack_address(address));
+
+        int _user_contri = 0 ; 
+        ;; int _old_u_contri = 0
+        if(_old_user_contri == -1){
+            int _contri = contrivalue~load_coins(); 
+            ;; _old_u_contri = _contri ; 
+            _user_contri = _contri - __user_contri;
+        }
+
+        
+
+        users_token~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_coins(_user_tokens));
+        users_contribution~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_coins(_user_contri));
+        users_last_contribution~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_coins(0).store_coins(0).store_uint(0,32));
+        save_data();
+
+        slice msg_body = begin_cell().end_cell().begin_parse();
+
+        cell msg = begin_cell()
+                .store_uint(0x18, 6)
+                .store_slice(address)
+                 .store_coins(__user_contri)
+                 .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+                 .store_slice(msg_body)
+                .end_cell();
+
+ 
+                 send_raw_message(msg, 64); 
+       
+
+        return ();
+
+    }
+
+
+
+      
+
+}
+
+
+
+
+;; ;; Function to claim tokens (users can claim their tokens)
+;; int claim_tokens(slice msg_cs) {
+;;     ;; Check if the user has any tokens to claim
+;;     ;; int user_tokens = map_get(users_contribution, msg_sender(), 0);
+    
+;;     slice address = msg_cs~load_msg_addr();
+
+;;     (_, int _user_tokens) = users_contribution.dict_get?(ADDRESS_SIZE, pack_address(address));
+    
+;;     if (_user_tokens > 0) {
+;;         ;; Reset the user's token balance in the map
+       
+;;         users_contribution~dict_set_builder(ADDRESS_SIZE, pack_address(address), begin_cell().store_int(0, 1));
+        
+;;         ;; Send the tokens to the user
+;;         send_tokens(address, _user_tokens);
+        
+;;         ;; Operation successful
+;;         return 1;
+;;     }
+    
+;;     ;; User has no tokens to claim
+;;     return 0;
+;; }
+
+
+
+;; ;; Function to withdraw TON balance by the owner
+;; int withdraw_grams(slice in_msg_body) {
+;;     ;; Parse the owner address from the stored cell 
+;;     cell b = begin_cell().store_slice(in_msg_body~load_msg_addr()).end_cell();
+;;     slice address = in_msg_body~load_msg_addr();
+;;     ;; Check if the caller is the owner
+;;     (int token_rate,int ton_balance, slice owner_addr_cell) = load_data();
+
+;;     if (equal_slices(address, owner_addr_cell)) {  ;; Correct address check using slice comparison
+;;         ;; Transfer the entire TON balance to the owner
+    
+;;         builder msg = begin_cell() 
+;;             .store_slice(owner_addr_cell) ; 
+
+;;         send_raw_message(msg.end_cell(), ton_balance);
+        
+;;         ;; Reset the TON balance
+;;         ton_balance = 0;
+
+;;         ;; Operation successful
+;;         return 1;
+;;     }
+    
+;;     ;; Caller is not the owner
+;;     return 0;
+;; }
+
+
+(int,int,int) getUserLastContri(slice address) method_id {
+    load_data();
+    (slice value, int _user_tokens) = users_last_contribution.dict_get?(ADDRESS_SIZE, pack_address(address));
+    int coins = 0  ; 
+    int contri = 0  ; 
+    int time = 0  ; 
+    if(_user_tokens){
+        coins = value~load_coins() ; 
+        contri = value~load_coins() ; 
+        time = value~load_uint(32) ; 
+    }
+    return (coins,contri,time);    
+}
+
+(int) getUserContri(slice address) method_id {
+    load_data();
+    (slice value, int _user_tokens) = users_contribution.dict_get?(ADDRESS_SIZE, pack_address(address));
+    int coins = 0  ; 
+    if(_user_tokens){
+        coins = value~load_coins() ; 
+    }
+    return coins;    
+}
+ 
+
+(int) getUserClaimedToken(slice address) method_id {
+    load_data();
+    (slice value, int _user_tokens) = usesr_claimed.dict_get?(ADDRESS_SIZE, pack_address(address));
+    int coins = 0  ; 
+    if(_user_tokens){
+        coins = value~load_coins() ; 
+    }
+    return coins;    
+}
+
+
+
+
+(int) getUserToken(slice address) method_id {
+    load_data();
+    (slice value, int _user_tokens) = users_token.dict_get?(ADDRESS_SIZE, pack_address(address));
+    int coins = 0  ; 
+    if(_user_tokens){
+        coins = value~load_coins() ; 
+    }
+    return coins;    
+}
+
+
+(int) getUserWhitelisted(slice address) method_id {
+    (slice value, int whitelisted) = users_whitelisted.dict_get?(ADDRESS_SIZE, pack_address(address));
+    int _whitelisted = 0  ; 
+    if(whitelisted){
+        _whitelisted = value~load_coins() ; 
+    }
+    return _whitelisted;    
+
+}
+
+(int,int, int, int, slice, cell) getSaleDetails() impure method_id {
+    load_data();
+    return (token_rate,ton_balance,status,whitelist,owner_addr_cell,project_id);
+}
+
+
+(int,int, int, int, int,int, slice) getAdvanceSaleDetails() impure method_id {
+    load_data();
+    return (startTime,endTime,minBuy,maxBuy,hardCap,softCap,token_address);
+}
+
+
+
+ 

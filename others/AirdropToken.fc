@@ -1,0 +1,47 @@
+;; Standard library import
+include "stdlib.fc";
+
+;; Define a simple storage layout
+struct AirdropStorage {
+  owner: cell;
+  balances: map(address, int);
+  totalSupply: int;
+}
+
+;; Function to get the balance of a specific address
+int get_balance(AirdropStorage storage, address addr) asm "BALANCE"
+{
+  return (opt_to_result(storage.balances[addr]) default 0);
+}
+
+;; Function to perform the airdrop
+void airdrop(AirdropStorage storage, map(address, int) recipients) asm "AIRDROP"
+{
+  require(sender == storage.owner, 100); ;; Only the owner can perform airdrops
+
+  for ((address recipient, int amount) : recipients) {
+    storage.balances[recipient] = get_balance(storage, recipient) + amount;
+    storage.totalSupply += amount;
+  }
+}
+
+;; Entry point for the contract
+() main() {
+  ;; Load the storage
+  var storage = AirdropStorage.load();
+
+  ;; Handle incoming messages
+  var op = int(loadmsg());
+  if (op == "BALANCE") {
+    ;; Query balance
+    var addr = address(loadmsg());
+    sendmsg(get_balance(storage, addr));
+  } else if (op == "AIRDROP") {
+    ;; Perform airdrop
+    var recipients = loadmsg();
+    airdrop(storage, recipients);
+  }
+
+  ;; Save the storage
+  AirdropStorage.save(storage);
+}

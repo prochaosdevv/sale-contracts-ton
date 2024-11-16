@@ -1,0 +1,48 @@
+;; Standard library import
+include "stdlib.fc";
+
+;; Define a simple storage layout
+struct MultiSenderStorage {
+  owner: cell;
+  balances: map(address, int);
+  totalSupply: int;
+}
+
+;; Function to get the balance of a specific address
+int get_balance(MultiSenderStorage storage, address addr) asm "BALANCE"
+{
+  return (opt_to_result(storage.balances[addr]) default 0);
+}
+
+;; Function to send tokens to multiple addresses
+void multi_send(MultiSenderStorage storage, map(address, int) recipients) asm "MULTI_SEND"
+{
+  require(sender == storage.owner, 100); ;; Only the owner can send tokens
+
+  for ((address recipient, int amount) : recipients) {
+    require(get_balance(storage, sender) >= amount, 101); ;; Ensure the sender has enough balance
+    storage.balances[sender] -= amount;
+    storage.balances[recipient] = get_balance(storage, recipient) + amount;
+  }
+}
+
+;; Entry point for the contract
+() main() {
+  ;; Load the storage
+  var storage = MultiSenderStorage.load();
+
+  ;; Handle incoming messages
+  var op = int(loadmsg());
+  if (op == "BALANCE") {
+    ;; Query balance
+    var addr = address(loadmsg());
+    sendmsg(get_balance(storage, addr));
+  } else if (op == "MULTI_SEND") {
+    ;; Send tokens to multiple addresses
+    var recipients = loadmsg();
+    multi_send(storage, recipients);
+  }
+
+  ;; Save the storage
+  MultiSenderStorage.save(storage);
+}
