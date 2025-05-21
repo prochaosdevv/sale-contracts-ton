@@ -1,3 +1,7 @@
+# Introduction
+
+## It contains FunC contracts for deploying tokens and ICO with custom logic.
+
 # Fungible, Non-Fungible, Semi-Fungible Tokens Smart Contracts
 
 ## NFT (Non-Fungible tokens) in `nft` folder
